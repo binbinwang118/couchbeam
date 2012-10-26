@@ -18,29 +18,30 @@
 -export([db_request/4, db_request/5, db_request/6]).
 
 %% API urls
--export([server_connection/0, server_connection/2, server_connection/4,
-        server_info/1,
-        get_uuid/1, get_uuids/2,
-        replicate/2, replicate/3, replicate/4,
-        all_dbs/1, db_exists/2,
-        create_db/2, create_db/3, create_db/4,
-        open_db/2, open_db/3,
-        open_or_create_db/2, open_or_create_db/3, open_or_create_db/4,
-        delete_db/1, delete_db/2,
-        db_info/1,
-        save_doc/2, save_doc/3,
-        doc_exists/2,
-        open_doc/2, open_doc/3,
-        delete_doc/2, delete_doc/3,
-        save_docs/2, save_docs/3, delete_docs/2, delete_docs/3,
-        lookup_doc_rev/2, lookup_doc_rev/3,
-        fetch_attachment/3, fetch_attachment/4, fetch_attachment/5,
-        stream_fetch_attachment/4, stream_fetch_attachment/5,
-        stream_fetch_attachment/6, delete_attachment/3,
-        delete_attachment/4, put_attachment/4, put_attachment/5,
-        all_docs/1, all_docs/2, view/2, view/3,
-        ensure_full_commit/1, ensure_full_commit/2,
-        compact/1, compact/2]).
+-export([server_connection/0, server_connection/1, server_connection/2,
+         server_connection/4,
+         server_info/1,
+         get_uuid/1, get_uuids/2,
+         replicate/2, replicate/3, replicate/4,
+         all_dbs/1, db_exists/2,
+         create_db/2, create_db/3, create_db/4,
+         open_db/2, open_db/3,
+         open_or_create_db/2, open_or_create_db/3, open_or_create_db/4,
+         delete_db/1, delete_db/2,
+         db_info/1,
+         save_doc/2, save_doc/3,
+         doc_exists/2,
+         open_doc/2, open_doc/3,
+         delete_doc/2, delete_doc/3,
+         save_docs/2, save_docs/3, delete_docs/2, delete_docs/3,
+         lookup_doc_rev/2, lookup_doc_rev/3,
+         fetch_attachment/3, fetch_attachment/4, fetch_attachment/5,
+         stream_fetch_attachment/4, stream_fetch_attachment/5,
+         stream_fetch_attachment/6, delete_attachment/3,
+         delete_attachment/4, put_attachment/4, put_attachment/5,
+         all_docs/1, all_docs/2, view/2, view/3,
+         ensure_full_commit/1, ensure_full_commit/2,
+         compact/1, compact/2]).
 
 
 %% --------------------------------------------------------------------
@@ -72,13 +73,65 @@ version() ->
 %% @doc Create a server for connectiong to a CouchDB node
 %% @equiv server_connection("127.0.0.1", 5984, "", [], false)
 server_connection() ->
-    #server{host="127.0.0.1", port=5984, prefix="", options=[]}.
+    server_connection(<<"http://127.0.0.1:5984">>, []).
 
 %% @doc Create a server for connectiong to a CouchDB node
-%% @equiv server_connection(Host, Port, "", [])
+%% @equiv server_connection(Url, [])
+server_connection(Url) ->
+    server_connection(Url, []).
 
-server_connection(Host, Port) ->
-    server_connection(Host, Port, "", []).
+
+%% @doc Create a server for connectiong to a CouchDB node
+%%
+%%
+%%  For a description of Connect Options, look in the <a
+%%  href="http://www.erlang.org/doc/apps/gen_tcp/index.html">ssl</a> manpage.
+%%  For a description of SSL Options, look in the <a
+%%  href="http://www.erlang.org/do//apps/ssl/index.html">ssl</a> manpage.
+%%
+%%
+%% @spec server_connection(URL::binary(), Options::optionList())
+%%                        -> Server::server()
+%% optionList() = [option()]
+%% option() =
+%%          {connect_options, connect_options()}    |
+%%          {ssl_options, ssl_options()}            |
+%%          {pool, tem()}                           |
+%%          {proxy, proxy_options()                 |
+%%          {basic_auth, {username(), password()}}  |
+%%          {oauth, oauthOptions()}
+%%
+%% username() = string()
+%% password() = string()
+%% ssl_options() = See the ssl options from the ssl module.()
+%% proxy_options() = URL | {Host, Port}
+%% oauthOptions() = [oauth()]
+%% oauth() =
+%%          {consumer_key, string()} |
+%%          {token, string()} |
+%%          {token_secret, string()} |
+%%          {consumer_secret, string()} |
+%%          {signature_method, string()}
+%%
+
+server_connection(Url, Options) when is_list(Options) ->
+    %% couchbeam always use a pool. set it to default hackney pool if
+    %% none is fixed.
+    Options1 = case proplists:get_value(pool, Options) of
+        undefined ->
+            [{pool, default} | Options];
+        _ ->
+            Options
+    end,
+
+    #server{url=Url, options=Options1};
+
+%% @doc Create a server for connectiong to a CouchDB node
+%% @equiv server_connection(<<"http://Host:Port">>, [])
+server_connection(Host, Port) when is_integer(Port) ->
+    Url = iolist_to_binary(["http://", Host, ":", integer_to_list(Port)]),
+    server_connection(Url, []).
+
 
 %% @doc Create a server for connectiong to a CouchDB node
 %%
@@ -94,20 +147,18 @@ server_connection(Host, Port) ->
 %%                        -> Server::server()
 %% optionList() = [option()]
 %% option() =
-%%          {is_ssl, boolean()}                |
-%%          {ssl_options, [SSLOpt]}            |
-%%          {pool_name, atom()}                |
-%%          {proxy_host, string()}             |
-%%          {proxy_port, integer()}            |
-%%          {proxy_user, string()}             |
-%%          {proxy_password, string()}         |
-%%          {basic_auth, {username(), password()}} |
-%%          {cookie, string()}                 |
+%%          {connect_options, connect_options()}    |
+%%          {is_ssl, bool}                          |
+%%          {ssl_options, ssl_options()}            |
+%%          {pool, tem()}                           |
+%%          {proxy, proxy_options()                 |
+%%          {basic_auth, {username(), password()}}  |
 %%          {oauth, oauthOptions()}
 %%
 %% username() = string()
 %% password() = string()
-%% SSLOpt = term()
+%% ssl_options() = See the ssl options from the ssl module.()
+%% proxy_options() = URL | {Host, Port}
 %% oauthOptions() = [oauth()]
 %% oauth() =
 %%          {consumer_key, string()} |
@@ -121,22 +172,25 @@ server_connection(Host, Port, Prefix, Options) when is_binary(Port) ->
 server_connection(Host, Port, Prefix, Options) when is_list(Port) ->
     server_connection(Host, list_to_integer(Port), Prefix, Options);
 server_connection(Host, Port, Prefix, Options) when is_integer(Port), Port =:=443 ->
-    Options1 = case proplists:get_value(ssl_options, Options) of
-        undefined ->
-            [{is_ssl, true}, {ssl_options, []}|Options];
-        _ ->
-            [{is_ssl, true}|Options]
-    end,
-
-    #server{host=Host, port=Port, prefix=Prefix, options=Options1};
+    Url = iolist_to_binary(["https://", Host, ":",
+                            integer_to_list(Port), Prefix]),
+    server_connection(Url, Options);
 server_connection(Host, Port, Prefix, Options) ->
-    #server{host=Host, port=Port, prefix=Prefix, options=Options}.
+    Scheme = case proplists:get_value(is_ssl, Options) of
+        true ->
+            "https://";
+        false ->
+            "http://"
+    end,
+    Url = iolist_to_binary([Scheme, Host, ":",  integer_to_list(Port),
+                            Prefix]),
+    server_connection(Url, Options).
+
 
 %% @doc Get Information from the server
 %% @spec server_info(server()) -> {ok, iolist()}
-server_info(#server{options=IbrowseOpts}=Server) ->
-    Url = binary_to_list(iolist_to_binary(server_url(Server))),
-    case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+server_info(#server{url=Url, options=ServerOpts}) ->
+    case couchbeam_httpc:request(get, Url, [200], ServerOpts) of
         {ok, _Status, _Headers, Body} ->
             Version = couchbeam_ejson:decode(Body),
             {ok, Version};
@@ -167,12 +221,12 @@ get_uuids(Server, Count) ->
 %%
 %% @spec replicate(Server::server(), RepObj::{list()})
 %%          -> {ok, Result}|{error, Error}
-replicate(#server{options=IbrowseOpts}=Server, RepObj) ->
+replicate(#server{options=ServerOpts}=Server, RepObj) ->
     Url = make_url(Server, "_replicate", []),
     Headers = [{"Content-Type", "application/json"}],
     JsonObj = couchbeam_ejson:encode(RepObj),
 
-    case couchbeam_httpc:request_stream({self(), once}, post, Url, IbrowseOpts, Headers,
+    case couchbeam_httpc:request_stream({self(), once}, post, Url, ServerOpts, Headers,
             JsonObj) of
         {ok, ReqId} ->
             couchbeam_changes:wait_for_change(ReqId);
@@ -204,9 +258,9 @@ replicate(Server, Source, Target, {Prop}) ->
 
 %% @doc get list of databases on a CouchDB node
 %% @spec all_dbs(server()) -> {ok, iolist()}
-all_dbs(#server{options=IbrowseOpts}=Server) ->
+all_dbs(#server{options=ServerOpts}=Server) ->
     Url = make_url(Server, "_all_dbs", []),
-    case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+    case couchbeam_httpc:request(get, Url, [200], ServerOpts) of
         {ok, _, _, Body} ->
             AllDbs = couchbeam_ejson:decode(Body),
             {ok, AllDbs};
@@ -216,9 +270,9 @@ all_dbs(#server{options=IbrowseOpts}=Server) ->
 
 %% @doc test if db with dbname exists on the CouchDB node
 %% @spec db_exists(server(), string()) -> boolean()
-db_exists(#server{options=IbrowseOpts}=Server, DbName) ->
+db_exists(#server{options=ServerOpts}=Server, DbName) ->
     Url = make_url(Server, DbName, []),
-    case couchbeam_httpc:request(head, Url, ["200"], IbrowseOpts) of
+    case couchbeam_httpc:request(head, Url, [200], ServerOpts) of
         {ok, _, _, _} -> true;
         _Error -> false
     end.
@@ -244,13 +298,13 @@ create_db(Server, DbName, Options) ->
 %%
 %% @spec create_db(Server::server(), DbName::string(),
 %%                 Options::optionList(), Params::list()) -> {ok, db()|{error, Error}}
-create_db(#server{options=IbrowseOpts}=Server, DbName, Options, Params) ->
-    Options1 = couchbeam_util:propmerge1(Options, IbrowseOpts),
+create_db(#server{options=ServerOpts}=Server, DbName, Options, Params) ->
+    Options1 = couchbeam_util:propmerge1(Options, ServerOpts),
     Url = make_url(Server, dbname(DbName), Params),
-    case couchbeam_httpc:request(put, Url, ["201"], Options1) of
+    case couchbeam_httpc:request(put, Url, [201], Options1) of
         {ok, _Status, _Headers, _Body} ->
             {ok, #db{server=Server, name=DbName, options=Options1}};
-        {error, {ok, "412", _, _}} ->
+        {error, {ok, 412, _, _}} ->
             {error, db_exists};
        Error ->
           Error
@@ -264,8 +318,8 @@ open_db(Server, DbName) ->
 %% @doc Create a client for connection to a database
 %% @spec open_db(Server::server(), DbName::string(), Options::optionList())
 %%              -> {ok, db()}
-open_db(#server{options=IbrowseOpts}=Server, DbName, Options) ->
-    Options1 = couchbeam_util:propmerge1(Options, IbrowseOpts),
+open_db(#server{options=ServerOpts}=Server, DbName, Options) ->
+    Options1 = couchbeam_util:propmerge1(Options, ServerOpts),
     {ok, #db{server=Server, name=dbname(DbName), options=Options1}}.
 
 
@@ -284,10 +338,10 @@ open_or_create_db(Server, DbName, Options) ->
 %% @doc Create a client for connecting to a database and create the
 %%      database if needed.
 %% @spec open_or_create_db(server(), string(), list(), list()) -> {ok, db()|{error, Error}}
-open_or_create_db(#server{options=IbrowseOpts}=Server, DbName, Options, Params) ->
+open_or_create_db(#server{options=ServerOpts}=Server, DbName, Options, Params) ->
     Url = make_url(Server, DbName, []),
-    IbrowseOpts1 = couchbeam_util:propmerge1(Options, IbrowseOpts),
-    case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts1) of
+    ServerOpts1 = couchbeam_util:propmerge1(Options, ServerOpts),
+    case couchbeam_httpc:request(get, Url, [200], ServerOpts1) of
         {ok, _, _, _} ->
             open_db(Server, DbName, Options);
         {error, {ok, "404", _, _}} ->
@@ -303,9 +357,9 @@ delete_db(#db{server=Server, name=DbName}) ->
 
 %% @doc delete database
 %% @spec delete_db(server(), DbName) -> {ok, iolist()|{error, Error}}
-delete_db(#server{options=IbrowseOpts}=Server, DbName) ->
+delete_db(#server{options=ServerOpts}=Server, DbName) ->
     Url = make_url(Server, dbname(DbName), []),
-    case couchbeam_httpc:request(delete, Url, ["200"], IbrowseOpts) of
+    case couchbeam_httpc:request(delete, Url, [200], ServerOpts) of
         {ok, _, _, Body} ->
             {ok, couchbeam_ejson:decode(Body)};
         Error ->
@@ -314,13 +368,13 @@ delete_db(#server{options=IbrowseOpts}=Server, DbName) ->
 
 %% @doc get database info
 %% @spec db_info(db()) -> {ok, iolist()|{error, Error}}
-db_info(#db{server=Server, name=DbName, options=IbrowseOpts}) ->
+db_info(#db{server=Server, name=DbName, options=ServerOpts}) ->
     Url = make_url(Server, DbName, []),
-    case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+    case couchbeam_httpc:request(get, Url, [200], ServerOpts) of
         {ok, _Status, _Headers, Body} ->
             Infos = couchbeam_ejson:decode(Body),
             {ok, Infos};
-        {error, {ok, "404", _, _}} ->
+        {error, {ok, 404, _, _}} ->
             {error, db_not_found};
        Error ->
           Error
@@ -328,10 +382,10 @@ db_info(#db{server=Server, name=DbName, options=IbrowseOpts}) ->
 
 %% @doc test if doc with uuid exists in the given db
 %% @spec doc_exists(db(), string()) -> boolean()
-doc_exists(#db{server=Server, options=IbrowseOpts}=Db, DocId) ->
+doc_exists(#db{server=Server, options=ServerOpts}=Db, DocId) ->
     DocId1 = couchbeam_util:encode_docid(DocId),
     Url = make_url(Server, doc_url(Db, DocId1), []),
-    case couchbeam_httpc:request(head, Url, ["200"], IbrowseOpts) of
+    case couchbeam_httpc:request(head, Url, [200], ServerOpts) of
         {ok, _, _, _} -> true;
         _Error -> false
     end.
@@ -345,10 +399,10 @@ open_doc(Db, DocId) ->
 %% Params is a list of query argument. Have a look in CouchDb API
 %% @spec open_doc(Db::db(), DocId::string(), Params::list())
 %%          -> {ok, Doc}|{error, Error}
-open_doc(#db{server=Server, options=IbrowseOpts}=Db, DocId, Params) ->
+open_doc(#db{server=Server, options=ServerOpts}=Db, DocId, Params) ->
     DocId1 = couchbeam_util:encode_docid(DocId),
     Url = make_url(Server, doc_url(Db, DocId1), Params),
-    case db_request(get, Url, ["200", "201"], IbrowseOpts) of
+    case db_request(get, Url, [200, 201], ServerOpts) of
         {ok, _, _, Body} ->
             {ok, couchbeam_ejson:decode(Body)};
         Error ->
@@ -374,7 +428,7 @@ save_doc(Db, Doc) ->
 %% the couchdb node.
 %%
 %% @spec save_doc(Db::db(), Doc, Options::list()) -> {ok, Doc1}|{error, Error}
-save_doc(#db{server=Server, options=IbrowseOpts}=Db, {Props}=Doc, Options) ->
+save_doc(#db{server=Server, options=ServerOpts}=Db, {Props}=Doc, Options) ->
     DocId = case couchbeam_util:get_value(<<"_id">>, Props) of
         undefined ->
             [Id] = get_uuid(Server),
@@ -384,8 +438,8 @@ save_doc(#db{server=Server, options=IbrowseOpts}=Db, {Props}=Doc, Options) ->
     end,
     Url = make_url(Server, doc_url(Db, DocId), Options),
     Body = couchbeam_ejson:encode(Doc),
-    Headers = [{"Content-Type", "application/json"}],
-    case db_request(put, Url, ["201", "202"], IbrowseOpts, Headers, Body) of
+    Headers = [{<<"Content-Type">>, <<"application/json">>}],
+    case db_request(put, Url, [201, 202], ServerOpts, Headers, Body) of
         {ok, _, _, RespBody} ->
             {JsonProp} = couchbeam_ejson:decode(RespBody),
             NewRev = couchbeam_util:get_value(<<"rev">>, JsonProp),
@@ -447,7 +501,7 @@ save_docs(Db, Docs) ->
 
 %% @doc save a list of documents
 %% @spec save_docs(Db::db(), Docs::list(),Options::list()) -> {ok, Result}|{error, Error}
-save_docs(#db{server=Server, options=IbrowseOpts}=Db, Docs, Options) ->
+save_docs(#db{server=Server, options=ServerOpts}=Db, Docs, Options) ->
     Docs1 = [maybe_docid(Server, Doc) || Doc <- Docs],
     Options1 = couchbeam_util:parse_options(Options),
     {Options2, Body} = case couchbeam_util:get_value("all_or_nothing",
@@ -464,8 +518,8 @@ save_docs(#db{server=Server, options=IbrowseOpts}=Db, Docs, Options) ->
             {Options1, Body1}
         end,
     Url = make_url(Server, [db_url(Db), "/", "_bulk_docs"], Options2),
-    Headers = [{"Content-Type", "application/json"}],
-    case db_request(post, Url, ["201"], IbrowseOpts, Headers, Body) of
+    Headers = [{<<"Content-Type">>, <<"application/json">>}],
+    case db_request(post, Url, [201], ServerOpts, Headers, Body) of
         {ok, _, _, RespBody} ->
             {ok, couchbeam_ejson:decode(RespBody)};
         Error ->
@@ -475,10 +529,10 @@ save_docs(#db{server=Server, options=IbrowseOpts}=Db, Docs, Options) ->
 lookup_doc_rev(Db, DocId) ->
     lookup_doc_rev(Db, DocId, []).
 
-lookup_doc_rev(#db{server=Server, options=IbrowseOpts}=Db, DocId, Params) ->
+lookup_doc_rev(#db{server=Server, options=ServerOpts}=Db, DocId, Params) ->
     DocId1 = couchbeam_util:encode_docid(DocId),
     Url = make_url(Server, doc_url(Db, DocId1), Params),
-    case db_request(head, Url, ["200"], IbrowseOpts) of
+    case db_request(head, Url, [200], ServerOpts) of
         {ok, _, Headers, _} ->
             MHeaders = mochiweb_headers:make(Headers),
             re:replace(mochiweb_headers:get_value("etag", MHeaders),
@@ -530,7 +584,7 @@ stream_fetch_attachment(Db, DocId, Name, ClientPid, Options) ->
 %% @spec stream_fetch_attachment(Db::db(), DocId::string(), Name::string(),
 %%                               ClientPid::pid(), Options::list(), Timeout::integer())
 %%          -> {ok, reference()}|{error, term()}
-stream_fetch_attachment(#db{server=Server, options=IbrowseOpts}=Db, DocId, Name, ClientPid,
+stream_fetch_attachment(#db{server=Server, options=ServerOpts}=Db, DocId, Name, ClientPid,
         Options, Timeout) ->
     Options1 = couchbeam_util:parse_options(Options),
     %% custom headers. Allows us to manage Range.
@@ -545,7 +599,7 @@ stream_fetch_attachment(#db{server=Server, options=IbrowseOpts}=Db, DocId, Name,
     StartRef = make_ref(),
     Pid = spawn(couchbeam_attachments, attachment_acceptor, [ClientPid,
             StartRef, Timeout]),
-    case couchbeam_httpc:request_stream(Pid, get, Url, IbrowseOpts, Headers) of
+    case couchbeam_httpc:request_stream(Pid, get, Url, ServerOpts, Headers) of
         {ok, ReqId}    ->
             Pid ! {ibrowse_req_id, StartRef, ReqId},
             {ok, StartRef};
@@ -566,7 +620,7 @@ put_attachment(Db, DocId, Name, Body)->
 %%                  {content_length, string()}
 %%       body() = [] | string() | binary() | fun_arity_0() | {fun_arity_1(), initial_state()}
 %%       initial_state() = term()
-put_attachment(#db{server=Server, options=IbrowseOpts}=Db, DocId, Name, Body, Options) ->
+put_attachment(#db{server=Server, options=ServerOpts}=Db, DocId, Name, Body, Options) ->
     QueryArgs = case couchbeam_util:get_value(rev, Options) of
         undefined -> [];
         Rev -> [{"rev", couchbeam_util:to_list(Rev)}]
@@ -576,8 +630,12 @@ put_attachment(#db{server=Server, options=IbrowseOpts}=Db, DocId, Name, Body, Op
 
     FinalHeaders = lists:foldl(fun(Option, Acc) ->
                 case Option of
-                    {content_length, V} -> [{"Content-Length", V}|Acc];
-                    {content_type, V} -> [{"Content-Type", V}|Acc];
+                    {content_length, V} ->
+                            CLen = list_to_binary(integer_to_list(V)),
+                            [{<<"Content-Length">>, CLen}|Acc];
+                    {content_type, V} ->
+                            [{<<"Content-Type">>,
+                              couchbeam_util:to_binary(V)}|Acc];
                     _ -> Acc
                 end
         end, Headers, Options),
@@ -586,7 +644,7 @@ put_attachment(#db{server=Server, options=IbrowseOpts}=Db, DocId, Name, Body, Op
             couchbeam_util:encode_docid(DocId), "/",
             couchbeam_util:encode_att_name(Name)], QueryArgs),
 
-    case db_request(put, Url, ["201"], IbrowseOpts, FinalHeaders, Body) of
+    case db_request(put, Url, [201], ServerOpts, FinalHeaders, Body) of
         {ok, _, _, RespBody} ->
             {[{<<"ok">>, true}|R]} = couchbeam_ejson:decode(RespBody),
             {ok, {R}};
@@ -601,7 +659,7 @@ delete_attachment(Db, Doc, Name) ->
 
 %% @doc delete a document attachment
 %% @spec(db(), string()|list(), string(), list() -> {ok, Result} | {error, Error}
-delete_attachment(#db{server=Server, options=IbrowseOpts}=Db, DocOrDocId, Name, Options) ->
+delete_attachment(#db{server=Server, options=ServerOpts}=Db, DocOrDocId, Name, Options) ->
     Options1 = couchbeam_util:parse_options(Options),
     {Rev, DocId} = case DocOrDocId of
         {Props} ->
@@ -623,7 +681,7 @@ delete_attachment(#db{server=Server, options=IbrowseOpts}=Db, DocOrDocId, Name, 
                     Options1
             end,
             Url = make_url(Server, [db_url(Db), "/", DocId, "/", Name], Options2),
-            case db_request(delete, Url, ["200"], IbrowseOpts) of
+            case db_request(delete, Url, [200], ServerOpts) of
             {ok, _, _, RespBody} ->
                 {[{<<"ok">>,true}|R]} = couchbeam_ejson:decode(RespBody),
                 {ok, {R}};
@@ -711,7 +769,7 @@ view(#db{server=Server}=Db, ViewName, Options) ->
                 {post, proplists:delete("keys", Options1), Body1}
             end,
         Headers = case Method of
-            post -> [{"Content-Type", "application/json"}];
+                post -> [{<<"Content-Type">>, <<"application/json">>}];
             _ -> []
         end,
         NewView = #view{
@@ -735,10 +793,10 @@ ensure_full_commit(Db) ->
 %% @doc commit all docs in memory
 %% @spec ensure_full_commit(Db::db(), Options::list())
 %%                      -> {ok, term()}|{error, term()}
-ensure_full_commit(#db{server=Server, options=IbrowseOpts}=Db, Options) ->
+ensure_full_commit(#db{server=Server, options=ServerOpts}=Db, Options) ->
     Url = make_url(Server, [db_url(Db), "/_ensure_full_commit"], Options),
-    Headers = [{"Content-Type", "application/json"}],
-    case db_request(post, Url, ["201"], IbrowseOpts, Headers) of
+    Headers = [{<<"Content-Type">>, <<"application/json">>}],
+    case db_request(post, Url, [201], ServerOpts, Headers) of
         {ok, _, _, Body} ->
             {[{<<"ok">>, true}|R]} = couchbeam_ejson:decode(Body),
             {ok, R};
@@ -750,10 +808,10 @@ ensure_full_commit(#db{server=Server, options=IbrowseOpts}=Db, Options) ->
 %% sections created during updates.
 %% See [http://wiki.apache.org/couchdb/Compaction] for more informations
 %% @spec compact(Db::db()) -> ok|{error, term()}
-compact(#db{server=Server, options=IbrowseOpts}=Db) ->
+compact(#db{server=Server, options=ServerOpts}=Db) ->
     Url = make_url(Server, [db_url(Db), "/_compact"], []),
-    Headers = [{"Content-Type", "application/json"}],
-    case db_request(post, Url, ["202"], IbrowseOpts, Headers) of
+    Headers = [{<<"Content-Type">>, <<"application/json">>}],
+    case db_request(post, Url, [202], ServerOpts, Headers) of
         {ok, _, _, _} ->
             ok;
         Error ->
@@ -763,10 +821,10 @@ compact(#db{server=Server, options=IbrowseOpts}=Db) ->
 %% current version of the design document.
 %% See [http://wiki.apache.org/couchdb/Compaction#View_compaction] for more informations
 %% @spec compact(Db::db(), ViewName::string()) -> ok|{error, term()}
-compact(#db{server=Server, options=IbrowseOpts}=Db, DesignName) ->
+compact(#db{server=Server, options=ServerOpts}=Db, DesignName) ->
     Url = make_url(Server, [db_url(Db), "/_compact/", DesignName], []),
-    Headers = [{"Content-Type", "application/json"}],
-    case db_request(post, Url, ["202"], IbrowseOpts, Headers) of
+    Headers = [{<<"Content-Type">>, <<"application/json">>}],
+    case db_request(post, Url, [202], ServerOpts, Headers) of
         {ok, _, _, _} ->
             ok;
         Error ->
@@ -788,18 +846,9 @@ maybe_docid(Server, {DocProps}) ->
             {DocProps}
     end.
 
-%% @doc Asemble the server URL for the given client
-%% @spec server_url({Host, Port}) -> iolist()
-server_url(#server{host=Host, port=Port, options=Options}) ->
-    Ssl = couchbeam_util:get_value(is_ssl, Options, false),
-    server_url({Host, Port}, Ssl).
-
-%% @doc Assemble the server URL for the given client
-%% @spec server_url({Host, Port}, Ssl) -> iolist()
-server_url({Host, Port}, false) ->
-    ["http://",Host,":",integer_to_list(Port)];
-server_url({Host, Port}, true) ->
-    ["https://",Host,":",integer_to_list(Port)].
+%% @doc Return the server url from the opaque server record
+server_url(#server{url=Url}) ->
+    Url.
 
 uuids_url(Server) ->
     binary_to_list(iolist_to_binary([server_url(Server), "/", "_uuids"])).
@@ -817,12 +866,11 @@ db_url(#db{name=DbName}) ->
 doc_url(Db, DocId) ->
     [db_url(Db), "/", DocId].
 
-make_url(Server=#server{prefix=Prefix}, Path, Query) ->
+make_url(#server{url=Url}, Path, Query) ->
     Query1 = couchbeam_util:encode_query(Query),
     binary_to_list(
         iolist_to_binary(
-            [server_url(Server),
-             Prefix, "/",
+            [Url, "/",
              Path,
              [ ["?", mochiweb_util:urlencode(Query1)] || Query1 =/= [] ]
             ])).
@@ -835,11 +883,11 @@ db_request(Method, Url, Expect, Options, Headers, Body) ->
     case couchbeam_httpc:request(Method, Url, Expect, Options, Headers, Body) of
         Resp = {ok, _, _, _} ->
             Resp;
-        {error, {ok, "404", _, _}} ->
+        {error, {ok, 404, _, _}} ->
             {error, not_found};
-        {error, {ok, "409", _, _}} ->
+        {error, {ok, 409, _, _}} ->
             {error, conflict};
-        {error, {ok, "412", _, _}} ->
+        {error, {ok, 412, _, _}} ->
             {error, precondition_failed};
         Error ->
             Error

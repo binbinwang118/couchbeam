@@ -87,10 +87,8 @@
 -type view_query_args() :: #view_query_args{}.
 
 -record(server, {
-    host :: string(),
-    port :: integer(),
-    prefix :: string(),
-    options = [] :: list()
+        url :: binary(),
+        options = [] :: list()
 }).
 
 -type server() :: #server{}.
@@ -105,7 +103,7 @@
 -type db() :: #db{}.
 
 -record(server_uuids, {
-    host_port,
+    url,
     uuids
 }).
 

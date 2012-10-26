@@ -43,10 +43,10 @@ init(_) ->
     ets:new(couchbeam_uuids, [named_table, public, {keypos, 2}]),
     {ok, #state{}}.
 
-handle_call({get_uuids, #server{host=Host, port=Port}=Server, Count},
+handle_call({get_uuids, #server{url=Url}=Server, Count},
         _From, State) ->
     {ok, Uuids} = do_get_uuids(Server, Count, [],
-        ets:lookup(couchbeam_uuids, {Host, Port})),
+        ets:lookup(couchbeam_uuids, Url)),
     {reply, Uuids, State}.
 
 
@@ -81,9 +81,8 @@ do_get_uuids(Server, Count, Acc, [#server_uuids{uuids=Uuids}]) ->
             do_get_uuids(Server, Count, Acc, [ServerUuids]);
         _ ->
             {Acc1, Uuids1} = do_get_uuids1(Acc, Uuids, Count),
-            #server{host=Host, port=Port} = Server,
-            ServerUuids = #server_uuids{host_port={Host,Port},
-                uuids=Uuids1},
+            #server{url=Url} = Server,
+            ServerUuids = #server_uuids{url=Url, uuids=Uuids1},
             ets:insert(couchbeam_uuids, ServerUuids),
             do_get_uuids(Server, Count, Acc1, [ServerUuids])
     end.
@@ -99,15 +98,14 @@ do_get_uuids1(Acc, [Uuid|Rest], Count) ->
 get_new_uuids(Server) ->
     get_new_uuids(Server, []).
 
-get_new_uuids(Server=#server{host=Host, port=Port,
-                             options=IbrowseOptions}, Acc) ->
+get_new_uuids(Server=#server{url=ServerUrl,  options=Opts}, Acc) ->
     Count = integer_to_list(1000 - length(Acc)),
     Url = couchbeam:make_url(Server, "_uuids", [{"count", Count}]),
-    case couchbeam_httpc:request(get, Url, ["200"], IbrowseOptions) of
+    case couchbeam_httpc:request(get, Url, [200], Opts) of
         {ok, _Status, _Headers, Body} ->
             {[{<<"uuids">>, Uuids}]} = couchbeam_ejson:decode(Body),
-            ServerUuids = #server_uuids{host_port={Host,
-                        Port}, uuids=(Acc ++ Uuids)},
+            ServerUuids = #server_uuids{url=ServerUrl,
+                                        uuids=(Acc ++ Uuids)},
                 ets:insert(couchbeam_uuids, ServerUuids),
             {ok, ServerUuids};
         Error ->

@@ -89,9 +89,10 @@ oauth_header(Url, Action, OauthProps) ->
         put -> "PUT";
         head -> "HEAD"
     end,
-    Params = oauth:signed_params(Method, Url, QSL, Consumer, Token, TokenSecret)
-    -- QSL,
-    {"Authorization", "OAuth " ++ oauth_uri:params_to_header_string(Params)}.
+    Params = oauth:signed_params(Method, Url, QSL, Consumer,
+                                 Token, TokenSecret) -- QSL,
+    ParamsStr =  oauth_uri:params_to_header_string(Params),
+    {<<"Authorization">>, list_to_binary("OAuth " ++ ParamsStr) }.
 
 
 %% @doc merge 2 proplists. All the Key - Value pairs from both proplists
