@@ -19,19 +19,22 @@
 
 %% API urls
 -export([server_connection/0, server_connection/2, server_connection/4,
-        server_info/1,
-        get_uuid/1, get_uuids/2,
-        replicate/2, replicate/3, replicate/4,
-        all_dbs/1, db_exists/2,
+        server_info/1,get_revs_limit/1,set_revs_limit/2,
+        get_uuid/1, get_uuids/2,get_db_security/1,generate_api_key/1,
+		set_permissions/4,view_cleanup/1,get_session/2,set_session/3,
+        replicate/2, replicate/3, replicate/4,set_db_security/2,
+        all_dbs/1, db_exists/2,revs_diff/2,missing_revs/2,
         create_db/2, create_db/3, create_db/4,
-        open_db/2, open_db/3,
+        open_db/2, open_db/3,delete_session/2,sauth_set/3,
         open_or_create_db/2, open_or_create_db/3, open_or_create_db/4,
         delete_db/1, delete_db/2,
-        db_info/1,
-        save_doc/2, save_doc/3,
+        db_info/1,design_doc_info/2,design_show/2,design_search/3,
+        save_doc/2, save_doc/3,save_local_doc/2,save_local_doc/3,
+		save_doc_post/2, save_doc_post/3,
+		copy_doc/3,copy_doc/4,copy_local_doc/3,copy_local_doc/4,
         doc_exists/2,
-        open_doc/2, open_doc/3,
-        delete_doc/2, delete_doc/3,
+        open_doc/2, open_doc/3,open_local_doc/2,open_local_doc/3,
+        delete_doc/2, delete_doc/3,delete_local_doc/2,delete_local_doc/3,
         save_docs/2, save_docs/3, delete_docs/2, delete_docs/3,
         lookup_doc_rev/2, lookup_doc_rev/3,
         fetch_attachment/3, fetch_attachment/4, fetch_attachment/5,
@@ -395,6 +398,295 @@ save_doc(#db{server=Server, options=IbrowseOpts}=Db, {Props}=Doc, Options) ->
             Doc1 = couchbeam_doc:set_value(<<"_rev">>, NewRev,
                 couchbeam_doc:set_value(<<"_id">>, NewDocId, Doc)),
             {ok, Doc1};
+        Error ->
+            Error
+    end.
+
+
+save_doc_post(Db, Doc) ->
+    save_doc_post(Db, Doc, []).
+
+
+save_doc_post(#db{server=Server, options=IbrowseOpts}=Db, {Props}=Doc, Options) ->
+    DocId = case couchbeam_util:get_value(<<"_id">>, Props) of
+        undefined ->
+            [Id] = get_uuid(Server),
+            Id;
+        DocId1 ->
+            couchbeam_util:encode_docid(DocId1)
+    end,
+    Url = make_url(Server, db_url(Db), Options),
+    Body = couchbeam_ejson:encode(Doc),
+    Headers = [{"Content-Type", "application/json"}],
+    case db_request(post, Url, ["201", "202"], IbrowseOpts, Headers, Body) of
+        {ok, _, _, RespBody} ->
+            {JsonProp} = couchbeam_ejson:decode(RespBody),
+            NewRev = couchbeam_util:get_value(<<"rev">>, JsonProp),
+            NewDocId = couchbeam_util:get_value(<<"id">>, JsonProp),
+            Doc1 = couchbeam_doc:set_value(<<"_rev">>, NewRev,
+                couchbeam_doc:set_value(<<"_id">>, NewDocId, Doc)),
+            {ok, Doc1};
+        Error ->
+            Error
+    end.
+
+save_local_doc(Db, Doc) ->
+    save_local_doc(Db, Doc, []).
+
+save_local_doc(#db{server=Server, options=IbrowseOpts}=Db, {Props}=Doc, Options) ->
+    DocId = case couchbeam_util:get_value(<<"_id">>, Props) of
+        undefined ->
+            [Id] = get_uuid(Server),
+            Id;
+        DocId1 ->
+            couchbeam_util:encode_docid(DocId1)
+    end,
+    Url = make_url(Server, [db_url(Db), "/_local/", DocId], Options),
+    Body = couchbeam_ejson:encode(Doc),
+    Headers = [{"Content-Type", "application/json"}],
+    case db_request(put, Url, ["201", "202"], IbrowseOpts, Headers, Body) of
+        {ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+delete_local_doc(Db, DocId) ->
+    delete_local_doc(Db, DocId, []).
+
+delete_local_doc(#db{server=Server, options=IbrowseOpts}=Db, DocId, Options) ->
+    Url = make_url(Server, [db_url(Db), "/_local/", DocId], Options),
+    case couchbeam_httpc:request(delete, Url, ["200", "201"], IbrowseOpts) of
+        {ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+open_local_doc(Db, DocId) ->
+    open_local_doc(Db, DocId, []).
+
+open_local_doc(#db{server=Server, options=IbrowseOpts}=Db, DocId, Params) ->
+    DocId1 = couchbeam_util:encode_docid(DocId),
+    Url = make_url(Server, [db_url(Db), "/_local/", DocId], Params),
+    case db_request(get, Url, ["200", "201"], IbrowseOpts) of
+        {ok, _, _, Body} ->
+            {ok, couchbeam_ejson:decode(Body)};
+        Error ->
+            Error
+    end.
+
+%% para DstDocId : binary()
+copy_doc(Db,Doc,DstDocId) ->
+	copy_doc(Db,Doc,DstDocId,[]).
+
+copy_doc(#db{server=Server, options=IbrowseOpts}=Db, {Props}=Doc,DstDocId,Options) ->
+	DocId = couchbeam_util:get_value(<<"_id">>, Props),
+	Url = make_url(Server,doc_url(Db, DocId),Options),
+	%Body = couchbeam_ejson:encode(Doc),
+	Headers = [{"Destination",binary_to_list(DstDocId)}],
+	case db_request(copy, Url, ["201"], IbrowseOpts, Headers, []) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+copy_local_doc(Db,DocId,DstDocId) ->
+	copy_local_doc(Db,DocId,DstDocId,[]).
+
+copy_local_doc(#db{server=Server, options=IbrowseOpts}=Db, DocId,DstDocId,Options) ->
+	Url = make_url(Server,[db_url(Db), "/_local/", DocId],Options),
+	Headers = [{"Destination",binary_to_list(DstDocId)}],
+	case db_request(copy, Url, ["201"], IbrowseOpts, Headers, []) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+get_revs_limit(#db{server=Server, options=IbrowseOpts}=Db) ->
+	Url = make_url(Server,[db_url(Db), "/_revs_limit"],[]),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+%% RevNumber : list()
+set_revs_limit(#db{server=Server, options=IbrowseOpts}=Db, RevNum) ->
+	Url = make_url(Server,[db_url(Db), "/_revs_limit"],[]),
+	Headers = [{"Content-Type", "application/json"}],
+	Body = RevNum,
+	case db_request(put, Url, ["200"], IbrowseOpts, Headers, Body) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+%% Content like {[{<<"readers">>, {[{<<"roles">>,[]},{<<"names">>,[<<"tim">>,<<"brain">>]}]}}]}
+set_db_security(#db{server=Server, options=IbrowseOpts}=Db,Content) ->
+	Url = make_url(Server,[db_url(Db), "/_security"],[]),
+	Headers = [{"Content-Type", "application/json"}],
+	Body = couchbeam_ejson:encode(Content),
+	case couchbeam_httpc:request(put, Url, ["200"], IbrowseOpts,Headers,Body) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+get_db_security(#db{server=Server, options=IbrowseOpts}=Db) ->
+	Url = make_url(Server,[db_url(Db), "/_security"],[]),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+generate_api_key(#server{options=IbrowseOpts}=Server) ->
+	Url = make_url(Server,["api", "/generate_api_key"],[]),
+	case db_request(post, Url, ["200"], IbrowseOpts) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+%% key: list()
+%% Account: list()
+%% DbName: list()
+set_permissions(#server{options=IbrowseOpts}=Server,Key,Account,DbName) ->
+	Url = make_url(Server,["api", "/set_permissions"],[]),
+	Body = "username="++Key++"&database="++Account++"/"++DbName++"&roles=_reader&roles=_writer",
+	%io:format("body", [list_to_binary(Body)]),
+	case couchbeam_httpc:request(post, Url, ["200"], IbrowseOpts, [], Body) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+
+%% para: {authsession:string,AuthSessionID:binary()}|{cookie:string(),CookieID:binary()}
+get_session(#server{options=IbrowseOpts}=Server,CookieOrAuth) ->
+	Url = make_url(Server,["_session"],[]),
+	Headers = case CookieOrAuth of
+		 {authsession,AuthSession}->
+			[{"AuthSession",binary_to_list(AuthSession)}];
+		{cookie,Cookie} ->
+			[{"cookie",binary_to_list(Cookie)}]
+	end,
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts,Headers,[]) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+%% Name=string(), Pasword=string()
+set_session(#server{options=IbrowseOpts}=Server,Name,Password) ->
+	Url = make_url(Server,["_session"],[]),
+	Body = "name="++Name++"&password="++Password,
+	Headers = [{"Content-Type","application/x-www-form-urlencoded"}],
+	case couchbeam_httpc:request(post, Url, ["200"], IbrowseOpts,Headers,Body) of
+		{ok, _, RespHeaders, RespBody} ->
+			{_, AuthSession} = lists:keyfind("Set-Cookie", 1, RespHeaders),
+			{ok,couchbeam_doc:extend( {<<"Set-Cookie">>, list_to_binary(AuthSession)},couchbeam_ejson:decode(RespBody) )};
+        Error ->
+            Error
+    end.
+
+%% AuthSessionID:binary()
+delete_session(#server{options=IbrowseOpts}=Server,AuthSessionID) ->
+	Url = make_url(Server,["_session"],[]),
+	Headers = [{"AuthSession",binary_to_list(AuthSessionID)}],
+	case couchbeam_httpc:request(delete, Url, ["200"], IbrowseOpts,Headers,[]) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+%% Name : list()
+%% Roles : list() example "bar,baz"
+sauth_set(#server{options=IbrowseOpts}=Server,Name,Roles) ->
+	Url = make_url(Server,["_sauth"],[]),
+	Body = "name="++Name++"&roles="++Roles,
+	Headers=[{"Content-Type","application/x-www-form-urlencoded"}],
+	case couchbeam_httpc:request(post, Url, ["200"], IbrowseOpts, Headers , Body) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+view_cleanup(#db{server=Server, options=IbrowseOpts}=Db) ->
+	Url = make_url(Server,[db_url(Db), "/_view_cleanup"],[]),
+	case db_request(post, Url, ["202"], IbrowseOpts) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+%% DocRevs is a json like bellow,
+%%  {[{<<"docdif1">>,[Rev1,Rev2,<<"4-xxx">>]}, {<<"docdif2">>,[Rev4]}]}
+revs_diff(#db{server=Server, options=IbrowseOpts}=Db,DocRevs) ->
+	Url = make_url(Server,[db_url(Db), "/_revs_diff"],[]),
+	Headers = [{"Content-Type", "application/json"}],
+	Body = couchbeam_ejson:encode(DocRevs),
+	case couchbeam_httpc:request(post, Url, ["200"], IbrowseOpts,Headers,Body) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+%% DocRevs is a json like bellow,
+%%  {[{<<"docdif1">>,[Rev1,Rev2,<<"4-xxx">>]}, {<<"docdif2">>,[Rev4]}]}
+missing_revs(#db{server=Server, options=IbrowseOpts}=Db,DocRevs) ->
+	Url = make_url(Server,[db_url(Db), "/_missing_revs"],[]),
+	Headers = [{"Content-Type", "application/json"}],
+	Body = couchbeam_ejson:encode(DocRevs),
+	case couchbeam_httpc:request(post, Url, ["200"], IbrowseOpts,Headers,Body) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+%% DDocId: binary()
+design_doc_info(#db{server=Server, options=IbrowseOpts}=Db,DDocId) ->
+	Url = make_url(Server,[db_url(Db), "/_design/", binary_to_list(DDocId),"/_info"],[]),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+%% DDocId:string()
+%% Item:string()
+%% Key: string()
+%% {DDocId,Item,Key}={couchbeam,detail,biking}
+design_show(#db{server=Server, options=IbrowseOpts}=Db,{DDocId,Item,Key}) ->
+	Url = make_url(Server,[db_url(Db), "/_design/", DDocId,"/_show/",Item,"/",Key],[]),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _, _, RespBody} ->
+            {ok, RespBody};
+        Error ->
+            Error
+    end.
+
+%% Option: list()
+%% 	Option like [{reduce,false}{q,"title:cat"}]
+design_search(#db{server=Server, options=IbrowseOpts}=Db,{DDocId,Item},Params) ->
+	Url = make_url(Server,[db_url(Db), "/_design/", DDocId,"/_search/",Item],Params),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
         Error ->
             Error
     end.
