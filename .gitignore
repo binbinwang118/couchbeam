@@ -10,3 +10,7 @@ doc/erlang.png
 doc/edoc-info
 t/*.beam
 examples/*.beam
+.gitignore
+.project
+.settings
+*~
