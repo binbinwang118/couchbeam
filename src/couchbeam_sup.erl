@@ -16,8 +16,43 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    Uuids = {couchbeam_uuids,
-                {couchbeam_uuids, start_link, []},
-	            permanent,2000,worker, [couchbeam_uuids]},
-
-    {ok, {{one_for_one, 10, 3600}, [Uuids]}}.
+	CouchApiChildSpec = 
+		{{one_for_one, 10, 3600},
+		 	[{couch_api_server,
+			  	{couch_api_server, start_link, []},
+			  	permanent,
+			  	2000,
+			  	worker,
+			  	[couch_api_server]},
+			 {couch_api_auth,
+			  	{couch_api_auth, start_link, []},
+			  	permanent,
+			  	2000,
+			  	worker,
+			  	[couch_api_auth]},
+			 {couch_api_db,
+			  	{couch_api_db, start_link, []},
+			  	permanent,
+			  	2000,
+			  	worker,
+			  	[couch_api_db]},
+			 {couch_api_doc,
+			  	{couch_api_doc, start_link, []},
+			  	permanent,
+			  	2000,
+			  	worker,
+			  	[couch_api_doc]},
+			 {couch_api_view,
+			  	{couch_api_view, start_link, []},
+			  	permanent,
+			  	2000,
+			  	worker,
+			  	[couch_api_view]},
+			 {couch_api_search,
+			  	{couch_api_search, start_link, []},
+				permanent,
+				2000,
+				worker,
+				[couch_api_search]}
+		 	]},
+	{ok, CouchApiChildSpec}.
