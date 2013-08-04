@@ -18,6 +18,9 @@
 
 -define(ENCODE_DOCID_FUNC, encode_docid1).
 
+-include("couchbeam.hrl").
+-export([make_url/3]).
+
 encode_att_name(Name) when is_binary(Name) ->
     encode_att_name(xmerl_ucs:from_utf8(Name));
 encode_att_name(Name) ->
@@ -229,3 +232,22 @@ get_app_env(Env, Default) ->
         {ok, Val} -> Val;
         undefined -> Default
     end.
+
+make_url(Server=#server{prefix=Prefix}, Path, Query) ->
+    Query1 = encode_query(Query),
+    binary_to_list(
+        iolist_to_binary(
+            [server_url(Server),
+             Prefix, "/",
+             Path,
+             [ ["?", mochiweb_util:urlencode(Query1)] || Query1 =/= [] ]
+            ])).
+
+server_url(#server{host=Host, port=Port, options=Options}) ->
+    Ssl = couchbeam_util:get_value(is_ssl, Options, false),
+    server_url({Host, Port}, Ssl).
+
+server_url({Host, Port}, false) ->
+    ["http://",Host,":",integer_to_list(Port)];
+server_url({Host, Port}, true) ->
+    ["https://",Host,":",integer_to_list(Port)].

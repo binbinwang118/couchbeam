@@ -12,11 +12,10 @@
 %% API functions
 %% ====================================================================
 -export([start_link/0]).
+-export([get_session/1,get_session/2,set_session/3,delete_session/2]).
 
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
-
 
 %% ====================================================================
 %% Behavioural functions 
@@ -39,6 +38,23 @@ init([]) ->
 	process_flag(trap_exit, true),
     {ok, #state{}}.
 
+%% API 
+%% ====================================================================
+%% Para: [{basic,true|false}]   default false
+get_session(Server) ->
+	get_session(Server,[{basic,false}]).
+get_session(Server,Para) ->
+    gen_server:call(?MODULE, {get_session, Server, Para}, ?ApiTimeout).
+
+%% Name:string(), Password:string()
+set_session(Server, Name, Password) ->
+	gen_server:call(?MODULE, {set_session, Server, Name, Password}, ?ApiTimeout).
+
+%% AuthSession:string()
+delete_session(Server, AuthSession) ->
+	gen_server:call(?MODULE, {delete_session, Server, AuthSession}, ?ApiTimeout).
+
+%% ====================================================================
 
 %% handle_call/3
 %% ====================================================================
@@ -57,9 +73,14 @@ init([]) ->
 	Timeout :: non_neg_integer() | infinity,
 	Reason :: term().
 %% ====================================================================
-handle_call(Request, From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call({delete_session, Server, AuthSession}, _From, State) ->
+    {reply, delete_session_internal(Server,AuthSession), State};
+
+handle_call({get_session, Server, Para}, _From, State) ->
+    {reply, get_session_internal(Server,Para), State};
+
+handle_call({set_session, Server, Name, Password}, _From, State) ->
+    {reply, set_session_internal(Server, Name, Password), State}.
 
 
 %% handle_cast/2
@@ -120,5 +141,32 @@ code_change(OldVsn, State, Extra) ->
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
+get_session_internal(#server{options=IbrowseOpts}=Server,Para) ->
+	Url = couchbeam_util:make_url(Server,["_session"],Para),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+set_session_internal(#server{options=IbrowseOpts}=Server,Name,Password) ->
+	Url = couchbeam_util:make_url(Server,["_session"],[]),
+	Body = "name="++Name++"&password="++Password,
+	Headers = [{"Content-Type","application/x-www-form-urlencoded"}],
+	case couchbeam_httpc:request(post, Url, ["200"], IbrowseOpts,Headers,Body) of
+		{ok, _, RespHeaders, RespBody} ->
+			{_, AuthSession} = lists:keyfind("Set-Cookie", 1, RespHeaders),
+			{ok,couchbeam_doc:extend( {<<"Set-Cookie">>, list_to_binary(AuthSession)},couchbeam_ejson:decode(RespBody) )};
+        Error ->
+            Error
+    end.
 
-
+delete_session_internal(#server{options=IbrowseOpts}=Server,AuthSessionID) ->
+	Url = couchbeam_util:make_url(Server,["_session"],[]),
+	Headers = [{"AuthSession",AuthSessionID}],
+	case couchbeam_httpc:request(delete, Url, ["200"], IbrowseOpts,Headers,[]) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
