@@ -15,11 +15,12 @@
 -export([deprecated/3, shutdown_sync/1]).
 -export([start_app_deps/1, get_app_env/2]).
 -export([encode_docid1/1, encode_docid_noop/1]).
+-export([make_url/3, server_url/1]).
 
 -define(ENCODE_DOCID_FUNC, encode_docid1).
 
 -include("couchbeam.hrl").
--export([make_url/3]).
+
 
 encode_att_name(Name) when is_binary(Name) ->
     encode_att_name(xmerl_ucs:from_utf8(Name));
@@ -243,6 +244,8 @@ make_url(Server=#server{prefix=Prefix}, Path, Query) ->
              [ ["?", mochiweb_util:urlencode(Query1)] || Query1 =/= [] ]
             ])).
 
+%% @doc Asemble the server URL for the given client
+%% @spec server_url({Host, Port}) -> iolist()
 server_url(#server{host=Host, port=Port, options=Options}) ->
     Ssl = couchbeam_util:get_value(is_ssl, Options, false),
     server_url({Host, Port}, Ssl).

@@ -59,10 +59,7 @@ init([]) ->
 	Reason :: term().
 %% ====================================================================
 handle_call({get_server_info, S}, _From, State) ->
-	Result = case server_info(S) of
-				 {ok, Version} -> Version;
-				 Error		   -> Error
-			 end,
+	Result = server_info_internal(S),
 	{reply, Result, State};
 handle_call(Request, From, State) ->
     Reply = ok,
@@ -129,25 +126,12 @@ code_change(OldVsn, State, Extra) ->
 %% ====================================================================
 %% @doc Get Information from the server
 %% @spec server_info(server()) -> {ok, iolist()}
-server_info(#server{options=IbrowseOpts}=Server) ->
-    Url = binary_to_list(iolist_to_binary(server_url(Server))),
+server_info_internal(#server{options=IbrowseOpts}=Server) ->
+    Url = binary_to_list(iolist_to_binary(couchbeam_util:server_url(Server))),
     case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
         {ok, _Status, _Headers, Body} ->
             Version = couchbeam_ejson:decode(Body),
             {ok, Version};
         Error -> Error
     end.
-
-%% @doc Asemble the server URL for the given client
-%% @spec server_url({Host, Port}) -> iolist()
-server_url(#server{host=Host, port=Port, options=Options}) ->
-    Ssl = couchbeam_util:get_value(is_ssl, Options, false),
-    server_url({Host, Port}, Ssl).
-
-%% @doc Assemble the server URL for the given client
-%% @spec server_url({Host, Port}, Ssl) -> iolist()
-server_url({Host, Port}, false) ->
-    ["http://",Host,":",integer_to_list(Port)];
-server_url({Host, Port}, true) ->
-    ["https://",Host,":",integer_to_list(Port)].
 
