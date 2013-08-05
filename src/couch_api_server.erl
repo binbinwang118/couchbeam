@@ -11,13 +11,23 @@
 %% ====================================================================
 %% API functions
 %% ====================================================================
--export([start_link/0, get_server_info/1]).
+-export([start_link/0, get_server_info/1, get_couchdb_icon/1, get_all_dbs/1, get_active_tasks/1]).
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 get_server_info(#server{options=IbrowseOpts}=Server) ->
 	gen_server:call(?MODULE, {get_server_info, Server}, ?ApiTimeout).
+
+get_couchdb_icon(#server{options=IbrowseOpts}=Server) ->
+	gen_server:call(?MODULE, {get_couchdb_icon, Server}, ?ApiTimeout).
+
+get_all_dbs(#server{options=IbrowseOpts}=Server) ->
+	gen_server:call(?MODULE, {get_all_dbs, Server}, ?ApiTimeout).
+
+get_active_tasks(#server{options=IbrowseOpts}=Server) ->
+	gen_server:call(?MODULE, {get_active_tasks, Server}, ?ApiTimeout).
+	
 
 %% ====================================================================
 %% Behavioural functions 
@@ -60,6 +70,15 @@ init([]) ->
 %% ====================================================================
 handle_call({get_server_info, S}, _From, State) ->
 	Result = server_info_internal(S),
+	{reply, Result, State};
+handle_call({get_couchdb_icon, S}, _From, State) ->
+	Result = couchdb_icon_internal(S),
+	{reply, Result, State};
+handle_call({get_all_dbs, S}, _From, State) ->
+	Result = get_all_dbs_internal(S),
+	{reply, Result, State};
+handle_call({get_active_tasks, S}, _From, State) ->
+	Result = get_active_tasks_internal(S),
 	{reply, Result, State};
 handle_call(Request, From, State) ->
     Reply = ok,
@@ -135,3 +154,35 @@ server_info_internal(#server{options=IbrowseOpts}=Server) ->
         Error -> Error
     end.
 
+%% @doc Special path for providing a site icon
+%% @spec server_info(server()) -> {ok, iolist()}
+couchdb_icon_internal(#server{options=IbrowseOpts}=Server)->
+	Url = couchbeam_util:make_url(Server, "favicon.ico", []),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _Status, _Headers, Body} ->
+			Icon = Body;
+		Error -> Error
+	end.
+
+%% @doc Returns a list of all databases on couchdb server
+%% @spec server_info(server()) -> {ok, iolist()}
+get_all_dbs_internal(#server{options=IbrowseOpts}=Server) ->
+	Url = couchbeam_util:make_url(Server, "_all_dbs", []),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _Status, _Headers, Body} ->
+			AllDbs = couchbeam_ejson:decode(Body),
+			{ok, AllDbs};
+		Error -> Error
+	end.
+	
+%% @doc Returns a list of running tasks on couchdb server
+%% @spec server_info(server()) -> {ok, iolist()}
+get_active_tasks_internal(#server{options=IbrowseOpts}=Server) ->
+	Url = couchbeam_util:make_url(Server, "_active_tasks", []),
+	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
+		{ok, _Status, _Headers, Body} ->
+			ActiveTasks = couchbeam_ejson:decode(Body),
+			{ok, ActiveTasks};
+		Error -> Error
+	end.
+		
