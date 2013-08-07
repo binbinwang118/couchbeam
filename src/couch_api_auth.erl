@@ -12,7 +12,7 @@
 %% API functions
 %% ====================================================================
 -export([start_link/0]).
--export([get_session/1,get_session/2,set_session/3,delete_session/2]).
+-export([get_session/1,get_session/2,set_session/3,delete_session/2,user_add/4,user_delete/3]).
 
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -54,6 +54,17 @@ set_session(Server, Name, Password) ->
 delete_session(Server, AuthSession) ->
 	gen_server:call(?MODULE, {delete_session, Server, AuthSession}, ?ApiTimeout).
 
+%% UserName:string()
+%% Roles:list()
+%% Password:string()
+user_add(Server,UserName,Roles,Password) ->
+	gen_server:call(?MODULE, {user_add, Server, UserName, Roles, Password}, ?ApiTimeout).
+
+%% UserName:string()
+%% RevId:string
+user_delete(Server,UserName,RevId) ->
+	gen_server:call(?MODULE, {user_delete, Server, UserName,RevId}, ?ApiTimeout).
+
 %% ====================================================================
 
 %% handle_call/3
@@ -80,7 +91,13 @@ handle_call({get_session, Server, Para}, _From, State) ->
     {reply, get_session_internal(Server,Para), State};
 
 handle_call({set_session, Server, Name, Password}, _From, State) ->
-    {reply, set_session_internal(Server, Name, Password), State}.
+    {reply, set_session_internal(Server, Name, Password), State};
+
+handle_call({user_add, Server, UserName,Roles,Password}, _From, State) ->
+    {reply, user_add_internal(Server, UserName,Roles,Password), State};
+
+handle_call({user_delete, Server, UserName,RevId}, _From, State) ->
+    {reply, user_delete_internal(Server, UserName,RevId), State}.
 
 
 %% handle_cast/2
@@ -165,6 +182,42 @@ delete_session_internal(#server{options=IbrowseOpts}=Server,AuthSessionID) ->
 	Url = couchbeam_util:make_url(Server,["_session"],[]),
 	Headers = [{"AuthSession",AuthSessionID}],
 	case couchbeam_httpc:request(delete, Url, ["200"], IbrowseOpts,Headers,[]) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+user_add_internal(#server{options=IbrowseOpts}=Server,UserName, Roles,Password) ->
+	%%refer to : http://wiki.apache.org/couchdb/Security_Features_Overview#Authentication_database
+	PassSha = couchbeam_util:to_hex(crypto:sha(Password)),
+	
+	[_A,Md]=string:tokens(os:cmd("openssl rand 16 | openssl md5")," "),
+    Md5=string:substr(Md,1,32),
+    Msg="foobar"++Md5,
+    [_B,Re]=string:tokens(os:cmd("echo -n "++Msg++" | openssl sha1")," "),
+    Salt=string:substr(Re,1,40),
+
+	Url = couchbeam_util:make_url(Server,["_users","/","org.couchdb.user:"++UserName],[]),
+	Headers = [{"Content-Type","application/json"}],
+	Body=binary_to_list(couchbeam_ejson:encode(
+		  {[{<<"type">>,<<"user">>},
+          {<<"name">>,list_to_binary(UserName)},
+          {<<"roles">>,lists:map(fun(X) -> list_to_binary(X) end, Roles)},
+          {<<"password_sha">>,list_to_binary(PassSha)},
+		  {<<"salt">>,list_to_binary(Salt)} ]}
+		)),
+	io:format("Url=~p \nBody = ~p \n",[Url,Body]),
+	case couchbeam_httpc:request(put, Url, ["201"], IbrowseOpts,Headers,Body) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+user_delete_internal(#server{options=IbrowseOpts}=Server,UserName,RevId) ->
+	Url = couchbeam_util:make_url(Server,["_users","/","org.couchdb.user:"++UserName],[{"rev",RevId}]),
+	case couchbeam_httpc:request(delete, Url, ["200"], IbrowseOpts) of
 		{ok, _, _, RespBody} ->
             {ok, couchbeam_ejson:decode(RespBody)};
         Error ->

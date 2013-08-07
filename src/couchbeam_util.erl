@@ -15,7 +15,7 @@
 -export([deprecated/3, shutdown_sync/1]).
 -export([start_app_deps/1, get_app_env/2]).
 -export([encode_docid1/1, encode_docid_noop/1]).
--export([make_url/3, server_url/1]).
+-export([make_url/3, server_url/1,to_hex/1]).
 
 -define(ENCODE_DOCID_FUNC, encode_docid1).
 
@@ -254,3 +254,13 @@ server_url({Host, Port}, false) ->
     ["http://",Host,":",integer_to_list(Port)];
 server_url({Host, Port}, true) ->
     ["https://",Host,":",integer_to_list(Port)].
+
+to_hex([]) ->
+    []; 
+to_hex(Bin) when is_binary(Bin) ->
+    to_hex(binary_to_list(Bin));
+to_hex([H|T]) ->
+    [to_digit(H div 16), to_digit(H rem 16) | to_hex(T)].
+
+to_digit(N) when N < 10 -> $0 + N;
+to_digit(N)             -> $a + N-10.
