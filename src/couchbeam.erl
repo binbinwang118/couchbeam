@@ -203,7 +203,7 @@ replicate(Server, Source, Target, {Prop}) ->
         {<<"target">>, couchbeam_util:to_binary(Target)} |Prop
     ],
 
-    replicate(Server, {RepProp}).
+    replicate(Server, RepProp).
 
 
 

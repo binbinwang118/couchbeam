@@ -15,7 +15,8 @@
 -export([deprecated/3, shutdown_sync/1]).
 -export([start_app_deps/1, get_app_env/2]).
 -export([encode_docid1/1, encode_docid_noop/1]).
--export([make_url/3, server_url/1,to_hex/1]).
+-export([make_url/3, server_url/1, doc_url/2, db_url/1]).
+-export([to_hex/1]).
 
 -define(ENCODE_DOCID_FUNC, encode_docid1).
 
@@ -243,6 +244,11 @@ make_url(Server=#server{prefix=Prefix}, Path, Query) ->
              Path,
              [ ["?", mochiweb_util:urlencode(Query1)] || Query1 =/= [] ]
             ])).
+db_url(#db{name=DbName}) ->
+    [DbName].
+
+doc_url(Db, DocId) ->
+    [db_url(Db), "/", DocId].
 
 %% @doc Asemble the server URL for the given client
 %% @spec server_url({Host, Port}) -> iolist()

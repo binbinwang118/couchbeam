@@ -5,30 +5,79 @@
 
 -module(couch_api_server).
 -behaviour(gen_server).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, 
+		 code_change/3]).
 -include("couchbeam.hrl").
--define(ApiTimeout, 30000).
+-define(Timeout, 30000).
 %% ====================================================================
 %% API functions
 %% ====================================================================
--export([start_link/0, get_server_info/1, get_couchdb_icon/1, get_all_dbs/1, get_active_tasks/1]).
+-export([start_link/0, get_server_info/1, get_couchdb_icon/1, get_all_dbs/1, 
+		 get_active_tasks/1, replicate/4, add_replicator/5, remove_replicator/3,
+		 get_uuids/2]).
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-get_server_info(#server{options=IbrowseOpts}=Server) ->
-	gen_server:call(?MODULE, {get_server_info, Server}, ?ApiTimeout).
+%% @doc Get Information from the server
+%% @spec server_info(server()) -> {ok, iolist()}
+get_server_info(#server{}=Server) ->
+	gen_server:call(?MODULE, {get_server_info, Server}, ?Timeout).
 
-get_couchdb_icon(#server{options=IbrowseOpts}=Server) ->
-	gen_server:call(?MODULE, {get_couchdb_icon, Server}, ?ApiTimeout).
+%% @doc Special path for providing a site icon
+%% @spec server_info(server()) -> {ok, iolist()}
+get_couchdb_icon(#server{}=Server) ->
+	gen_server:call(?MODULE, {get_couchdb_icon, Server}, ?Timeout).
 
-get_all_dbs(#server{options=IbrowseOpts}=Server) ->
-	gen_server:call(?MODULE, {get_all_dbs, Server}, ?ApiTimeout).
+%% @doc Returns a list of all databases on couchdb server
+%% @spec server_info(server()) -> {ok, iolist()}
+get_all_dbs(#server{}=Server) ->
+	gen_server:call(?MODULE, {get_all_dbs, Server}, ?Timeout).
 
-get_active_tasks(#server{options=IbrowseOpts}=Server) ->
-	gen_server:call(?MODULE, {get_active_tasks, Server}, ?ApiTimeout).
+%% @doc Returns a list of running tasks on couchdb server
+%% @spec server_info(server()) -> {ok, iolist()}
+get_active_tasks(#server{}=Server) ->
+	gen_server:call(?MODULE, {get_active_tasks, Server}, ?Timeout).
 	
+%% @doc handle Replication. Allows to pass options with source and
+%% target.  Options is a Json object.
+%% ex:
+%% ```
+%% Source = "repldb1",
+%% Target = "repldb2",
+%% Prop = {[{<<"create_target">>, true}]},
+%% '''
+replicate(#server{}=Server, Source, Target, {Prop}) ->
+	gen_server:call(?MODULE, {replicate, Server, Source, Target, {Prop}}, ?Timeout).
 
+%% @doc remove the replication doc from replicator DB
+%% ```
+%% ex:
+%% RepDocId = "docid123",
+%% Source = "replidb1",
+%% Target = "replidb2",
+%% Prop = [{<<"create_target">>, true}],
+%% '''
+add_replicator(#server{}=Server, RepDocId, Source, Target, {Prop})->
+	gen_server:call(?MODULE, {add_replicator, Server, RepDocId, Source, Target, {Prop}}, ?Timeout).
+
+%% @doc remove the replication doc from replicator DB
+%% ```
+%% ex:
+%% RepDocId = "docid123",
+%% Rev = {<<"rev">>, <<"5-6b6c68009663774d697be8af974cdc4e">>},
+%% '''
+remove_replicator(#server{}=Server, RepDocId, Rev)->
+	gen_server:call(?MODULE, {remove_replicator, Server, RepDocId, Rev}, ?Timeout).
+
+%% @doc Returns a list of generated UUIDs from CouchDB
+%% ```
+%% ex:
+%% Count = 5,
+%% Rev 
+%% @spec get_uuids(server(), integer()) -> lists()
+get_uuids(Server, Count) ->
+    gen_server:call(?MODULE, {get_uuids, Server, Count}).
 %% ====================================================================
 %% Behavioural functions 
 %% ====================================================================
@@ -80,7 +129,20 @@ handle_call({get_all_dbs, S}, _From, State) ->
 handle_call({get_active_tasks, S}, _From, State) ->
 	Result = get_active_tasks_internal(S),
 	{reply, Result, State};
+handle_call({replicate, Server, Source, Target, {Prop}}, _From, State) ->
+	Result = replicate_internal(Server, Source, Target, {Prop}),
+	{reply, Result, State};
+handle_call({add_replicator, Server, RepDocId, Source, Target, {Prop}}, _From, State) ->
+	Result = add_replicator_internal(Server, RepDocId, Source, Target, {Prop}),
+	{reply, Result, State};
+handle_call({remove_replicator, Server, RepDocId, Rev}, _From, State) ->
+	Result = remove_replicator_internal(Server, RepDocId, Rev),
+	{reply, Result, State};
+handle_call({get_uuids, Server, Count}, _From, State) ->
+	Result = get_uuids_internal(Server, Count),
+	{reply, Result, State};
 handle_call(Request, From, State) ->
+	io:format("Default handl_call for debug!\n"),
     Reply = ok,
     {reply, Reply, State}.
 
@@ -143,8 +205,6 @@ code_change(OldVsn, State, Extra) ->
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
-%% @doc Get Information from the server
-%% @spec server_info(server()) -> {ok, iolist()}
 server_info_internal(#server{options=IbrowseOpts}=Server) ->
     Url = binary_to_list(iolist_to_binary(couchbeam_util:server_url(Server))),
     case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
@@ -154,8 +214,6 @@ server_info_internal(#server{options=IbrowseOpts}=Server) ->
         Error -> Error
     end.
 
-%% @doc Special path for providing a site icon
-%% @spec server_info(server()) -> {ok, iolist()}
 couchdb_icon_internal(#server{options=IbrowseOpts}=Server)->
 	Url = couchbeam_util:make_url(Server, "favicon.ico", []),
 	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
@@ -164,8 +222,6 @@ couchdb_icon_internal(#server{options=IbrowseOpts}=Server)->
 		Error -> Error
 	end.
 
-%% @doc Returns a list of all databases on couchdb server
-%% @spec server_info(server()) -> {ok, iolist()}
 get_all_dbs_internal(#server{options=IbrowseOpts}=Server) ->
 	Url = couchbeam_util:make_url(Server, "_all_dbs", []),
 	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
@@ -175,8 +231,6 @@ get_all_dbs_internal(#server{options=IbrowseOpts}=Server) ->
 		Error -> Error
 	end.
 	
-%% @doc Returns a list of running tasks on couchdb server
-%% @spec server_info(server()) -> {ok, iolist()}
 get_active_tasks_internal(#server{options=IbrowseOpts}=Server) ->
 	Url = couchbeam_util:make_url(Server, "_active_tasks", []),
 	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
@@ -186,3 +240,72 @@ get_active_tasks_internal(#server{options=IbrowseOpts}=Server) ->
 		Error -> Error
 	end.
 		
+replicate_internal(Server, Source, Target, {Prop}) ->
+    RepProp = [
+        {<<"source">>, couchbeam_util:to_binary(Source)},
+        {<<"target">>, couchbeam_util:to_binary(Target)} |Prop
+    ],
+    replicate_internal(Server, {RepProp}).
+
+%% @doc Handle replication. Pass an object containting all informations
+%% It allows to pass for example an authentication info
+%% ```
+%% RepObj = {[
+%% {<<"source">>, <<"sourcedb">>},
+%% {<<"target">>, <<"targetdb">>},
+%% {<<"create_target">>, true}
+%% ]}
+%% replicate(Server, RepObj).
+%% '''
+%%
+%% @spec replicate(Server::server(), RepObj::{list()})
+%%          -> {ok, Result}|{error, Error}
+replicate_internal(#server{options=IbrowseOpts}=Server, RepObj) ->
+    Url = couchbeam_util:make_url(Server, "_replicate", []),
+    Headers = [{"Content-Type", "application/json"}],
+    JsonObj = couchbeam_ejson:encode(RepObj),
+     case couchbeam_httpc:request(post, Url, ["200", "201"], IbrowseOpts,
+                                  Headers, JsonObj) of
+        {ok, _, _, Body} ->
+            Res = couchbeam_ejson:decode(Body),
+            {ok, Res};
+        Error ->
+            Error
+    end.
+
+add_replicator_internal(#server{options=IbrowseOpts}=Server, RepDocId, Source, Target, {Prop}) ->
+	Url = couchbeam_util:make_url(Server, ["_replicator", "/", RepDocId], []),
+	Headers = [{"Content-Type", "application/json"}],
+	ReplicatorDoc = [
+		{<<"_id">>, couchbeam_util:to_binary(RepDocId)},
+        {<<"source">>, couchbeam_util:to_binary(Source)},
+        {<<"target">>, couchbeam_util:to_binary(Target)} |Prop
+    ],
+	ReplicatorDocJsonObj = couchbeam_ejson:encode({ReplicatorDoc}),
+	case couchbeam_httpc:request(put, Url, ["200", "201"], IbrowseOpts,
+                                  Headers, ReplicatorDocJsonObj) of
+        {ok, _, _, Body} ->
+            JsonBody = couchbeam_ejson:decode(Body),
+			{ok, JsonBody};
+        Error ->
+            Error
+    end.
+
+remove_replicator_internal(#server{options=IbrowseOpts}=Server, RepDocId, Rev) ->
+	Url = couchbeam_util:make_url(Server, ["_replicator", "/", RepDocId], [Rev]),
+	case couchbeam_httpc:request(delete, Url, ["200", "201"], IbrowseOpts) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error ->
+			Error
+	end.
+
+get_uuids_internal(#server{options=IbrowseOpts}=Server, Count) ->
+	Pros = {<<"count">>, Count},
+	Url = couchbeam_util:make_url(Server, ["_uuids"], [Pros]),
+	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowseOpts) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error ->
+			Error
+	end.
