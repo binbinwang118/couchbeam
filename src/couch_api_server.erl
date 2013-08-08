@@ -10,11 +10,14 @@
 -include("couchbeam.hrl").
 -define(Timeout, 30000).
 %% ====================================================================
-%% API functions
+%% couch_api_server API functions
+%  http://wiki.apache.org/couchdb/Complete_HTTP_API_Reference
 %% ====================================================================
 -export([start_link/0, get_server_info/1, get_couchdb_icon/1, get_all_dbs/1, 
 		 get_active_tasks/1, replicate/4, add_replicator/5, remove_replicator/3,
-		 get_uuids/2]).
+		 get_uuids/2, restart_couchdb/1, get_couchdb_stats/1, get_couchdb_log/1,
+		 get_config/1, get_config_section/2, get_config_key/3, update_config_key/4,
+		 delete_config_key/3]).
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -74,10 +77,62 @@ remove_replicator(#server{}=Server, RepDocId, Rev)->
 %% ```
 %% ex:
 %% Count = 5,
-%% Rev 
+%% '''
 %% @spec get_uuids(server(), integer()) -> lists()
-get_uuids(Server, Count) ->
+get_uuids(#server{}=Server, Count) ->
     gen_server:call(?MODULE, {get_uuids, Server, Count}).
+
+%% @doc Restart the couchdb server, requires admin privileges
+restart_couchdb(#server{}=Server) ->
+	gen_server:call(?MODULE, {restart_couchdb, Server}).
+
+%% @doc Returns couchdb server statistics
+get_couchdb_stats(#server{}=Server) ->
+	gen_server:call(?MODULE, {get_couchdb_stats, Server}, ?Timeout).
+
+%% @doc Returns the tail of the server's log file, requires admin privileges
+get_couchdb_log(#server{}=Server) ->
+	gen_server:call(?MODULE, {get_couchdb_log, Server}, ?Timeout).
+
+%% @doc Returns the entire couchdb server configuration
+get_config(#server{}=Server) ->
+	gen_server:call(?MODULE, {get_config, Server}, ?Timeout).
+
+%% @doc Returns a single section from couchdb server configuration
+%% ```
+%% ex:
+%% Section = "couchdb",
+%% '''
+get_config_section(#server{}=Server, Section) ->
+	gen_server:call(?MODULE, {get_config_section, Server, Section}, ?Timeout).
+
+%% @doc Returns a single section from couchdb server configuration
+%% ```
+%% ex:
+%% Section = "couchdb",
+%% Key = "database_dir",
+%% '''
+get_config_key(#server{}=Server, Section, Key) ->
+	gen_server:call(?MODULE, {get_config_key, Server, Section, Key}, ?Timeout).
+
+%% @doc Set a single configuration value in a given section to couchdb server configuration
+%% ```
+%% ex:
+%% Section = "couchdb",
+%% Key = "database_dir",
+%% UpdatedValue = "config_value",
+%% '''
+update_config_key(#server{}=Server, Section, Key, UpdatedValue) ->
+	gen_server:call(?MODULE, {update_config_key, Server, Section, Key, UpdatedValue}, ?Timeout).
+
+%% @doc Delete a single configuration value from a given section in couchdb server configuration
+%% ```
+%% ex:
+%% Section = "couchdb",
+%% Key = "database_dir",
+%% '''
+delete_config_key(#server{}=Server, Section, Key) ->
+	gen_server:call(?MODULE, {delete_config_key, Server, Section, Key}).
 %% ====================================================================
 %% Behavioural functions 
 %% ====================================================================
@@ -140,6 +195,30 @@ handle_call({remove_replicator, Server, RepDocId, Rev}, _From, State) ->
 	{reply, Result, State};
 handle_call({get_uuids, Server, Count}, _From, State) ->
 	Result = get_uuids_internal(Server, Count),
+	{reply, Result, State};
+handle_call({restart_couchdb, Server}, _Form, State) ->
+	Result = restart_couchdb_internal(Server),
+	{reply, Result, State};
+handle_call({get_couchdb_stats, Server}, _From, State) ->
+	Result = get_couchdb_stats_internal(Server),
+	{reply, Result, State};
+handle_call({get_couchdb_log, Server}, _From, State) ->
+	Result = get_couchdb_log_internal(Server),
+	{reply, Result, State};
+handle_call({get_config, Server}, _From, State) ->
+	Result = get_config_internal(Server),
+	{reply, Result, State};
+handle_call({get_config_section, Server, Section}, _From, State) ->
+	Result = get_config_section_internal(Server, Section),
+	{reply, Result, State};
+handle_call({get_config_key, Server, Section, Key}, _From, State) ->
+	Result = get_config_key_internal(Server, Section, Key),
+	{reply, Result, State};
+handle_call({update_config_key, Server, Section, Key, UpdatedValue}, _From, State) ->
+	Result = update_config_key_internal(Server, Section, Key, UpdatedValue),
+	{reply, Result, State};
+handle_call({delete_config_key, Server, Section, Key}, _From, State) ->
+	Result = delete_config_key_internal(Server, Section, Key),
 	{reply, Result, State};
 handle_call(Request, From, State) ->
 	io:format("Default handl_call for debug!\n"),
@@ -309,3 +388,77 @@ get_uuids_internal(#server{options=IbrowseOpts}=Server, Count) ->
 		Error ->
 			Error
 	end.
+restart_couchdb_internal(#server{options=IbrowserOpts}=Server) ->
+	Url = couchbeam_util:make_url(Server, ["_restart"], []),
+	Headers = [{"Content-Type", "application/json"}],
+	case couchbeam_httpc:request(post, Url, ["200", "202"], IbrowserOpts, Headers) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error ->
+			Error
+	end.
+
+get_couchdb_stats_internal(#server{options=IbrowserOpts}=Server) ->
+	Url = couchbeam_util:make_url(Server, ["_stats"], []),
+	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowserOpts) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error ->
+			Error
+	end.
+
+get_couchdb_log_internal(#server{options=IbrowserOpts}=Server) ->
+	Url = couchbeam_util:make_url(Server, ["_log"], []),
+	case couchbeam_httpc:request(get, Url, ["200", [201]], IbrowserOpts) of
+		{ok, _, _, Body} ->
+			Body;
+	Error ->
+			Error
+	end.
+
+get_config_internal(#server{options=IbrowserOpts}=Server) ->
+	Url = couchbeam_util:make_url(Server, ["_config"], []),
+	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowserOpts) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error ->
+			Error
+	end.
+
+get_config_section_internal(#server{options=IbrowserOpts}=Server, Section) ->
+	Url = couchbeam_util:make_url(Server, ["_config", "/", Section], []),
+	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowserOpts) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error ->
+			Error
+	end.
+
+get_config_key_internal(#server{options=IbrowserOpts}=Server, Section, Key) ->
+	Url = couchbeam_util:make_url(Server, ["_config", "/", Section, "/", Key], []),
+	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowserOpts) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error ->
+			Error
+	end.
+
+update_config_key_internal(#server{options=IbrowserOpts}=Server, Section, Key, UpdatedValue) ->
+	Url = couchbeam_util:make_url(Server, ["_config", "/", Section, "/", Key], []),
+	Headers = [{"Content-Type", "application/json"}],
+	case couchbeam_httpc:request(put, Url, ["200"], IbrowserOpts, Headers, UpdatedValue) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error 			 ->
+			Error
+	end.
+
+delete_config_key_internal(#server{options=IbrowseOpts}=Server, Section, Key) ->
+	Url = couchbeam_util:make_url(Server, ["_config", "/", Section, "/", Key], []),
+	case couchbeam_httpc:request(delete, Url, ["200", "201"], IbrowseOpts) of
+		{ok, _, _, Body} ->
+			JsonBody = couchbeam_ejson:decode(Body);
+		Error ->
+			Error
+	end.
+	
