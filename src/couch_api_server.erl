@@ -28,17 +28,14 @@ get_server_info(#server{}=Server) ->
 	gen_server:call(?MODULE, {get_server_info, Server}, ?Timeout).
 
 %% @doc Special path for providing a site icon
-%% @spec server_info(server()) -> {ok, iolist()}
 get_couchdb_icon(#server{}=Server) ->
 	gen_server:call(?MODULE, {get_couchdb_icon, Server}, ?Timeout).
 
 %% @doc Returns a list of all databases on couchdb server
-%% @spec server_info(server()) -> {ok, iolist()}
 get_all_dbs(#server{}=Server) ->
 	gen_server:call(?MODULE, {get_all_dbs, Server}, ?Timeout).
 
 %% @doc Returns a list of running tasks on couchdb server
-%% @spec server_info(server()) -> {ok, iolist()}
 get_active_tasks(#server{}=Server) ->
 	gen_server:call(?MODULE, {get_active_tasks, Server}, ?Timeout).
 	
@@ -219,11 +216,7 @@ handle_call({update_config_key, Server, Section, Key, UpdatedValue}, _From, Stat
 	{reply, Result, State};
 handle_call({delete_config_key, Server, Section, Key}, _From, State) ->
 	Result = delete_config_key_internal(Server, Section, Key),
-	{reply, Result, State};
-handle_call(Request, From, State) ->
-	io:format("Default handl_call for debug!\n"),
-    Reply = ok,
-    {reply, Reply, State}.
+	{reply, Result, State}.
 
 
 %% handle_cast/2
@@ -288,8 +281,7 @@ server_info_internal(#server{options=IbrowseOpts}=Server) ->
     Url = binary_to_list(iolist_to_binary(couchbeam_util:server_url(Server))),
     case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
         {ok, _Status, _Headers, Body} ->
-            Version = couchbeam_ejson:decode(Body),
-            {ok, Version};
+            couchbeam_ejson:decode(Body);	   
         Error -> Error
     end.
 
@@ -297,7 +289,7 @@ couchdb_icon_internal(#server{options=IbrowseOpts}=Server)->
 	Url = couchbeam_util:make_url(Server, "favicon.ico", []),
 	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
 		{ok, _Status, _Headers, Body} ->
-			Icon = Body;
+			Body;
 		Error -> Error
 	end.
 
@@ -305,8 +297,7 @@ get_all_dbs_internal(#server{options=IbrowseOpts}=Server) ->
 	Url = couchbeam_util:make_url(Server, "_all_dbs", []),
 	case couchbeam_httpc:request(get, Url, ["200"], IbrowseOpts) of
 		{ok, _Status, _Headers, Body} ->
-			AllDbs = couchbeam_ejson:decode(Body),
-			{ok, AllDbs};
+			couchbeam_ejson:decode(Body);
 		Error -> Error
 	end.
 	
@@ -346,8 +337,7 @@ replicate_internal(#server{options=IbrowseOpts}=Server, RepObj) ->
      case couchbeam_httpc:request(post, Url, ["200", "201"], IbrowseOpts,
                                   Headers, JsonObj) of
         {ok, _, _, Body} ->
-            Res = couchbeam_ejson:decode(Body),
-            {ok, Res};
+            couchbeam_ejson:decode(Body);
         Error ->
             Error
     end.
@@ -364,8 +354,7 @@ add_replicator_internal(#server{options=IbrowseOpts}=Server, RepDocId, Source, T
 	case couchbeam_httpc:request(put, Url, ["200", "201"], IbrowseOpts,
                                   Headers, ReplicatorDocJsonObj) of
         {ok, _, _, Body} ->
-            JsonBody = couchbeam_ejson:decode(Body),
-			{ok, JsonBody};
+            couchbeam_ejson:decode(Body);
         Error ->
             Error
     end.
@@ -374,7 +363,7 @@ remove_replicator_internal(#server{options=IbrowseOpts}=Server, RepDocId, Rev) -
 	Url = couchbeam_util:make_url(Server, ["_replicator", "/", RepDocId], [Rev]),
 	case couchbeam_httpc:request(delete, Url, ["200", "201"], IbrowseOpts) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error ->
 			Error
 	end.
@@ -384,7 +373,7 @@ get_uuids_internal(#server{options=IbrowseOpts}=Server, Count) ->
 	Url = couchbeam_util:make_url(Server, ["_uuids"], [Pros]),
 	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowseOpts) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error ->
 			Error
 	end.
@@ -393,7 +382,7 @@ restart_couchdb_internal(#server{options=IbrowserOpts}=Server) ->
 	Headers = [{"Content-Type", "application/json"}],
 	case couchbeam_httpc:request(post, Url, ["200", "202"], IbrowserOpts, Headers) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error ->
 			Error
 	end.
@@ -402,7 +391,7 @@ get_couchdb_stats_internal(#server{options=IbrowserOpts}=Server) ->
 	Url = couchbeam_util:make_url(Server, ["_stats"], []),
 	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowserOpts) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error ->
 			Error
 	end.
@@ -420,7 +409,7 @@ get_config_internal(#server{options=IbrowserOpts}=Server) ->
 	Url = couchbeam_util:make_url(Server, ["_config"], []),
 	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowserOpts) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error ->
 			Error
 	end.
@@ -429,7 +418,7 @@ get_config_section_internal(#server{options=IbrowserOpts}=Server, Section) ->
 	Url = couchbeam_util:make_url(Server, ["_config", "/", Section], []),
 	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowserOpts) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error ->
 			Error
 	end.
@@ -438,7 +427,7 @@ get_config_key_internal(#server{options=IbrowserOpts}=Server, Section, Key) ->
 	Url = couchbeam_util:make_url(Server, ["_config", "/", Section, "/", Key], []),
 	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowserOpts) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error ->
 			Error
 	end.
@@ -448,7 +437,7 @@ update_config_key_internal(#server{options=IbrowserOpts}=Server, Section, Key, U
 	Headers = [{"Content-Type", "application/json"}],
 	case couchbeam_httpc:request(put, Url, ["200"], IbrowserOpts, Headers, UpdatedValue) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error 			 ->
 			Error
 	end.
@@ -457,7 +446,7 @@ delete_config_key_internal(#server{options=IbrowseOpts}=Server, Section, Key) ->
 	Url = couchbeam_util:make_url(Server, ["_config", "/", Section, "/", Key], []),
 	case couchbeam_httpc:request(delete, Url, ["200", "201"], IbrowseOpts) of
 		{ok, _, _, Body} ->
-			JsonBody = couchbeam_ejson:decode(Body);
+			couchbeam_ejson:decode(Body);
 		Error ->
 			Error
 	end.
