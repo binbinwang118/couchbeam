@@ -15,7 +15,10 @@
 -export([open_doc/2,open_doc/3,save_doc_post/2,save_doc_post/3,
 		 lookup_doc_rev/2,lookup_doc_rev/3,save_doc/2,save_doc/3,
 		 delete_doc/2,copy_doc/3,copy_doc/4,put_attachment/4,put_attachment/5,
-		 fetch_attachment/3,fetch_attachment/4,fetch_attachment/5]).
+		 fetch_attachment/3,fetch_attachment/4,fetch_attachment/5,
+		 delete_attachment/3,delete_attachment/4,save_local_doc/2,save_local_doc/3,
+		 open_local_doc/2,open_local_doc/3,copy_local_doc/3,copy_local_doc/4,
+		 delete_local_doc/3]).
 
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -43,7 +46,7 @@ init([]) ->
 
 %% API 
 %% ====================================================================
-%% @doc save a document
+%% @doc save a document/design doc
 %% @equiv save_doc(Db, Doc, [])
 save_doc(Db, Doc) ->
     save_doc(Db, Doc, []).
@@ -133,6 +136,39 @@ fetch_attachment(Db, DocId, Name, Options) ->
 fetch_attachment(Db, DocId, Name, Options, Timeout) ->
 	gen_server:call(?MODULE, {fetch_attachment, Db, DocId, Name, Options, Timeout}, ?ApiTimeout).
 
+delete_attachment(Db, Doc, Name) ->
+    delete_attachment(Db, Doc, Name, []).
+
+delete_attachment(Db, DocOrDocId, Name, Options) ->
+	gen_server:call(?MODULE, {delete_attachment, Db, DocOrDocId, Name, Options}, ?ApiTimeout).
+
+save_local_doc(Db, Doc) ->
+    save_local_doc(Db, Doc, []).
+
+save_local_doc(Db, Doc, Options) ->
+	gen_server:call(?MODULE, {save_local_doc, Db, Doc, Options}, ?ApiTimeout).
+
+%% DocId:string()
+open_local_doc(Db, DocId) ->
+    open_local_doc(Db, DocId, []).
+
+%% DocId:string()
+open_local_doc(Db, DocId, Params) ->
+	gen_server:call(?MODULE, {open_local_doc, Db, DocId, Params}, ?ApiTimeout).
+
+%% copy local document to standard document
+%% DocId:string()
+%% DstDocId:string()
+copy_local_doc(Db,DocId,DstDocId) ->
+	copy_local_doc(Db,DocId,DstDocId,[]).
+
+copy_local_doc(Db, DocId,DstDocId,Options) ->
+	gen_server:call(?MODULE, {copy_local_doc, Db, DocId,DstDocId,Options}, ?ApiTimeout).
+
+%% DocId:string()
+%% Options:[{"rev":revs}]
+delete_local_doc(Db, DocId, Options) ->
+	gen_server:call(?MODULE, {delete_local_doc, Db, DocId, Options}, ?ApiTimeout).
 
 %% ====================================================================
 
@@ -175,7 +211,23 @@ handle_call({put_attachment, Db, DocId, Name, Body, Options}, _From, State) ->
     {reply, put_attachment_internal(Db, DocId, Name, Body, Options), State};
 
 handle_call({fetch_attachment, Db, DocId, Name, Options, Timeout}, _From, State) ->
-    {reply, fetch_attachment_internal(Db, DocId, Name, Options, Timeout), State}.
+    {reply, fetch_attachment_internal(Db, DocId, Name, Options, Timeout), State};
+
+handle_call({delete_attachment, Db, DocOrDocId, Name, Options}, _From, State) ->
+    {reply, delete_attachment_internal(Db, DocOrDocId, Name, Options), State};
+
+handle_call({save_local_doc, Db, Doc, Options}, _From, State) ->
+    {reply, save_local_doc_internal(Db, Doc, Options), State};
+
+handle_call({open_local_doc, Db, DocId, Params}, _From, State) ->
+    {reply, open_local_doc_internal(Db, DocId, Params), State};
+
+handle_call({copy_local_doc, Db, DocId,DstDocId,Options}, _From, State) ->
+    {reply, copy_local_doc_internal(Db, DocId,DstDocId,Options), State};
+
+handle_call({delete_local_doc, Db, DocId, Options}, _From, State) ->
+    {reply, delete_local_doc_internal(Db, DocId, Options), State}.
+
 
 %% handle_cast/2
 %% ====================================================================
@@ -400,3 +452,82 @@ stream_fetch_attachment(#db{server=Server, options=IbrowseOpts}=Db, DocId, Name,
             {ok, StartRef};
         {error, Error} -> {error, Error}
     end.
+
+delete_attachment_internal(#db{server=Server, options=IbrowseOpts}=Db, DocOrDocId, Name, Options) ->
+    Options1 = couchbeam_util:parse_options(Options),
+    {Rev, DocId} = case DocOrDocId of
+        {Props} ->
+            Rev1 = couchbeam_util:get_value(<<"_rev">>, Props),
+            DocId1 = couchbeam_util:get_value(<<"_id">>, Props),
+            {binary_to_list(Rev1), binary_to_list(DocId1)};
+        DocId1 ->
+            Rev1 = couchbeam_util:get_value("rev", Options1),
+            {Rev1, DocId1}
+    end,
+    case Rev of
+        undefined ->
+           {error, rev_undefined};
+        _ ->
+            Options2 = case couchbeam_util:get_value("rev", Options1) of
+                undefined ->
+                    [{"rev", Rev}|Options1];
+                _ ->
+                    Options1
+            end,
+            Url = couchbeam_util:make_url(Server, [couchbeam_util:db_url(Db), "/", DocId, "/", Name], Options2),
+			case couchbeam_httpc:request(delete, Url, ["200"], IbrowseOpts) of
+            {ok, _, _, RespBody} ->
+                {[{<<"ok">>,true}|R]} = couchbeam_ejson:decode(RespBody),
+                {ok, {R}};
+
+            Error ->
+                Error
+            end
+    end.
+
+save_local_doc_internal(#db{server=Server, options=IbrowseOpts}=Db, {Props}=Doc, Options) ->
+    DocId = case couchbeam_util:get_value(<<"_id">>, Props) of
+        undefined ->
+            {[{_Uid,[Id]}]} = couch_api_server:get_uuids(Server,1),
+            binary_to_list(Id);
+        DocId1 ->
+            couchbeam_util:encode_docid(DocId1)
+    end,
+    Url = couchbeam_util:make_url(Server, [couchbeam_util:db_url(Db), "/_local/", DocId], Options),
+    Body = couchbeam_ejson:encode(Doc),
+    Headers = [{"Content-Type", "application/json"}],
+    case couchbeam_httpc:request(put, Url, ["201", "202"], IbrowseOpts, Headers, Body) of
+        {ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+open_local_doc_internal(#db{server=Server, options=IbrowseOpts}=Db, DocId, Params) ->
+    Url = couchbeam_util:make_url(Server, [couchbeam_util:db_url(Db), "/_local/", DocId], Params),
+	case couchbeam_httpc:request(get, Url, ["200", "201"], IbrowseOpts) of
+        {ok, _, _, Body} ->
+            {ok, couchbeam_ejson:decode(Body)};
+        Error ->
+            Error
+    end.
+
+copy_local_doc_internal(#db{server=Server, options=IbrowseOpts}=Db, DocId,DstDocId,Options) ->
+	Url = couchbeam_util:make_url(Server,[couchbeam_util:db_url(Db), "/_local/", DocId],Options),
+	Headers = [{"Destination",DstDocId}],
+	case couchbeam_httpc:request(copy, Url, ["201"], IbrowseOpts, Headers, []) of
+		{ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
+delete_local_doc_internal(#db{server=Server, options=IbrowseOpts}=Db, DocId, Options) ->
+    Url = couchbeam_util:make_url(Server, [couchbeam_util:db_url(Db), "/_local/", DocId], Options),
+    case couchbeam_httpc:request(delete, Url, ["200", "201"], IbrowseOpts) of
+        {ok, _, _, RespBody} ->
+            {ok, couchbeam_ejson:decode(RespBody)};
+        Error ->
+            Error
+    end.
+
