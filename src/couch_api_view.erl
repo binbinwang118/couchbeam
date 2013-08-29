@@ -14,7 +14,7 @@
 -export([start_link/0]).
 -export([design_doc_info/2,all/1,all/2,
 		 fetch/1,fetch/2,fetch/3,
-		 show/2]).
+		 show/2,view_loop/2]).
 
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -291,7 +291,7 @@ stream(#db{options=IbrowseOpts}=Db, ViewName, ClientPid, Options) ->
                 ClientPid ! {row, StartRef, Row}
         end,
         Params = {Args, Url, IbrowseOpts},
-        ViewPid = spawn_link(couchbeam_view, view_loop, [UserFun, Params]),
+        ViewPid = spawn_link(couch_api_view, view_loop, [UserFun, Params]),
 
         %% if we send multiple keys, we do a Post
         Result = case Args#view_query_args.method of
@@ -313,6 +313,21 @@ stream(#db{options=IbrowseOpts}=Db, ViewName, ClientPid, Options) ->
         end
     end).
 
+view_loop(UserFun, Params) ->
+    Callback = fun(200, _Headers, DataStreamFun) ->
+            EventFun = fun(Ev) ->
+                    view_ev1(Ev, UserFun)
+            end,
+            couchbeam_json_stream:events(DataStreamFun, EventFun)
+    end,
+
+    receive
+        {ibrowse_req_id, ReqId} ->
+            process_view_results(ReqId, Params, UserFun, Callback)
+    after ?DEFAULT_TIMEOUT ->
+        UserFun({error, timeout})
+    end.
+
 collect_view_results(Ref, Acc) ->
     receive
         {row, Ref, done} ->
@@ -330,12 +345,12 @@ make_view(#db{server=Server}=Db, ViewName, Options, Fun) ->
     Args = parse_view_options(Options),
     case ViewName of
         'all_docs' ->
-            Url = couchbeam:make_url(Server, [couchbeam:db_url(Db),
+            Url = couchbeam_util:make_url(Server, [couchbeam_util:db_url(Db),
                     "/_all_docs"],
                     Args#view_query_args.options),
             Fun(Args, Url);
         {DName, VName} ->
-            Url = couchbeam:make_url(Server, [couchbeam:db_url(Db),
+            Url = couchbeam_util:make_url(Server, [couchbeam_util:db_url(Db),
                     "/_design/", DName, "/_view/", VName],
                     Args#view_query_args.options),
             Fun(Args, Url);
@@ -440,4 +455,98 @@ show_internal(#db{server=Server, options=IbrowseOpts}=Db,{DDocId,Item,Key}) ->
             Error
     end.
 
+%% view json stream events
+view_ev1(object_start, UserFun) ->
+    fun(Ev) -> view_ev2(Ev, UserFun) end.
 
+view_ev2({key, <<"rows">>}, UserFun) ->
+    fun(Ev) -> view_ev3(Ev, UserFun) end;
+view_ev2(_, UserFun) ->
+    fun(Ev) -> view_ev2(Ev, UserFun) end.
+
+view_ev3(array_start, UserFun) ->
+    fun(Ev) -> view_ev_loop(Ev, UserFun) end.
+
+view_ev_loop(object_start, UserFun) ->
+    fun(Ev) ->
+        couchbeam_json_stream:collect_object(Ev,
+            fun(Obj) ->
+                UserFun(Obj),
+                fun(Ev2) -> view_ev_loop(Ev2, UserFun) end
+            end)
+    end;
+view_ev_loop(array_end, UserFun) ->
+    UserFun(done),
+    fun(_Ev) -> view_ev_done() end.
+
+view_ev_done() ->
+    fun(_Ev) -> view_ev_done() end.
+
+process_view_results(ReqId, Params, UserFun, Callback) ->
+    receive
+        {ibrowse_async_headers, IbrowseRef, Code, Headers} ->
+            case list_to_integer(Code) of
+                Ok when Ok =:= 200 ; Ok =:= 201 ; (Ok >= 400 andalso Ok < 500) ->
+                    StreamDataFun = fun() ->
+                        process_view_results1(ReqId, UserFun, Callback)
+                    end,
+                    ibrowse:stream_next(IbrowseRef),
+                    try
+                        Callback(Ok, Headers, StreamDataFun),
+                        couchbeam_httpc:clean_mailbox_req(ReqId)
+                    catch
+                        throw:http_response_end -> ok;
+                        _:Error ->
+                            UserFun({error, Error})
+                    after
+                        ibrowse:stream_close(ReqId)
+                    end,
+                    ok;
+                R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
+                    do_redirect(Headers, UserFun, Callback, Params),
+                    ibrowse:stream_close(ReqId);
+                Error ->
+                    UserFun({error, {http_error, {status,
+                                    Error}}})
+
+            end;
+        {ibrowse_async_response, ReqId, {error, _} = Error} ->
+            UserFun({error, Error})
+    end.
+
+process_view_results1(ReqId, UserFun, Callback) ->
+    receive
+        {ibrowse_async_response, ReqId, {error, Error}} ->
+            UserFun({error, Error});
+        {ibrowse_async_response, ReqId, <<>>} ->
+            ibrowse:stream_next(ReqId),
+            process_view_results1(ReqId, UserFun, Callback);
+        {ibrowse_async_response, ReqId, Data} ->
+            ibrowse:stream_next(ReqId),
+            {Data, fun() -> process_view_results1(ReqId, UserFun, Callback) end};
+        {ibrowse_async_response_end, ReqId} ->
+            UserFun(done),
+            {<<"">>, fun() -> throw(http_response_end) end}
+    end.
+
+do_redirect(Headers, UserFun, Callback, {Args, Url, IbrowseOpts}) ->
+    RedirectUrl = couchbeam_httpc:redirect_url(Headers, Url),
+    Params = {Args, RedirectUrl, IbrowseOpts},
+
+    %% if we send multiple keys, we do a Post
+    Result = case Args#view_query_args.method of
+        get ->
+            couchbeam_httpc:request_stream({self(), once}, get, RedirectUrl, IbrowseOpts);
+        post ->
+            Body = couchbeam_ejson:encode({[{<<"keys">>, Args#view_query_args.keys}]}),
+            Headers = [{"Content-Type", "application/json"}],
+            couchbeam_httpc:request_stream({self(), once}, get, RedirectUrl,
+                IbrowseOpts, Headers, Body)
+    end,
+
+    case Result of
+        {ok, ReqId} ->
+            process_view_results(ReqId, Params, UserFun, Callback);
+        Error ->
+            UserFun({error, {redirect, Error}})
+    end.
